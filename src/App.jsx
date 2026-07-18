@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const NAV_LINKS = ["Home", "Services", "About", "Contact"];
+const N8N_WEBHOOK_URL = "https://test-ai-n8n.onrender.com/webhook/bc8a3350-dead-4c3e-8519-1e2e495b7085";
 
 const FEATURES = [
   { title: "Live AI Booking", desc: "Book your appointment instantly with our AI-powered scheduler, available 24/7." },
@@ -34,8 +35,145 @@ function Section({ children, className = "" }) {
   return <section className={`px-6 md:px-20 ${className}`}>{children}</section>;
 }
 
+function getSessionId() {
+  const key = "clarity-dental-session-id";
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem(key, id);
+  }
+  return id;
+}
+
+function ChatWidget({ open, onClose, initialMessage }) {
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: "Hi, I'm Luna, Clarity Dental's AI assistant. How can I help you today?" },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const bottomRef = useRef(null);
+  const sentInitial = useRef(false);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  useEffect(() => {
+    if (open && initialMessage && !sentInitial.current) {
+      sentInitial.current = true;
+      sendMessage(initialMessage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialMessage]);
+
+  async function sendMessage(text) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setMessages((m) => [...m, { role: "user", text: trimmed }]);
+    setInput("");
+    setLoading(true);
+    setError(false);
+    try {
+      const res = await fetch(N8N_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message_text: trimmed, session_id: getSessionId() }),
+      });
+      if (!res.ok) throw new Error("Bad response");
+      const data = await res.json();
+      const reply = data?.reply || data?.output || "Sorry, I didn't catch that — could you try again?";
+      setMessages((m) => [...m, { role: "assistant", text: reply }]);
+    } catch (e) {
+      setError(true);
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          text: "I'm not able to connect right now — the clinic's AI assistant is still being set up. Please call the front desk to book directly.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end justify-end sm:items-end sm:justify-end p-0 sm:p-6">
+      <div className="absolute inset-0 bg-black/30 sm:hidden" onClick={onClose} />
+      <div className="relative w-full sm:w-96 h-full sm:h-[560px] bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="bg-teal-dark text-white px-5 py-4 flex items-center justify-between">
+          <div>
+            <div className="font-semibold">Luna</div>
+            <div className="text-xs text-white/70">Clarity Dental AI Assistant</div>
+          </div>
+          <button onClick={onClose} aria-label="Close chat" className="text-white/80 hover:text-white text-xl leading-none px-2">
+            ×
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-mint/30">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed ${
+                  m.role === "user" ? "bg-teal text-white" : "bg-white text-teal-dark shadow-sm"
+                }`}
+              >
+                {m.text}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-white text-muted rounded-2xl px-4 py-2 text-sm shadow-sm">Luna is typing…</div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+        <form
+          className="border-t border-sage p-3 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            sendMessage(input);
+          }}
+        >
+          <input
+            className="flex-1 rounded-full border border-sage px-4 py-2 text-sm focus:outline-none focus:border-teal"
+            placeholder="Type a message…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="bg-teal text-white rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            Send
+          </button>
+        </form>
+        {error && (
+          <div className="px-4 pb-3 text-xs text-coral">
+            Luna's booking system is still being connected — this message won't be received yet.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [openFaq, setOpenFaq] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInitialMessage, setChatInitialMessage] = useState(null);
+
+  function openChat(prefill) {
+    setChatInitialMessage(prefill || null);
+    setChatOpen(true);
+    setMenuOpen(false);
+  }
 
   return (
     <div className="bg-white text-teal-dark">
@@ -50,10 +188,53 @@ export default function App() {
             <a key={l} href="#" className="hover:text-teal-dark transition-colors">{l}</a>
           ))}
         </nav>
-        <a href="#book" className="bg-teal text-white text-sm font-semibold px-6 py-3 rounded-pill hover:opacity-90 transition">
-          Book Appointment
-        </a>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => openChat("I'd like to book an appointment.")}
+            className="hidden sm:inline-block bg-teal text-white text-sm font-semibold px-6 py-3 rounded-pill hover:opacity-90 transition"
+          >
+            Book Appointment
+          </button>
+          <button
+            className="md:hidden text-teal-dark p-2 -mr-2"
+            aria-label="Toggle menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              {menuOpen ? (
+                <>
+                  <line x1="5" y1="5" x2="19" y2="19" />
+                  <line x1="19" y1="5" x2="5" y2="19" />
+                </>
+              ) : (
+                <>
+                  <line x1="4" y1="7" x2="20" y2="7" />
+                  <line x1="4" y1="12" x2="20" y2="12" />
+                  <line x1="4" y1="17" x2="20" y2="17" />
+                </>
+              )}
+            </svg>
+          </button>
+        </div>
       </header>
+
+      {/* Mobile menu panel */}
+      {menuOpen && (
+        <div className="md:hidden fixed inset-x-0 top-[73px] z-40 bg-white border-b border-sage shadow-lg px-6 py-4 flex flex-col gap-4">
+          {NAV_LINKS.map((l) => (
+            <a key={l} href="#" className="text-teal-dark font-medium py-1" onClick={() => setMenuOpen(false)}>
+              {l}
+            </a>
+          ))}
+          <button
+            onClick={() => openChat("I'd like to book an appointment.")}
+            className="bg-teal text-white text-sm font-semibold px-6 py-3 rounded-pill hover:opacity-90 transition text-center"
+          >
+            Book Appointment
+          </button>
+        </div>
+      )}
 
       {/* Hero */}
       <Section className="grid md:grid-cols-2 gap-12 items-center py-20 bg-mint">
@@ -65,12 +246,18 @@ export default function App() {
             Advanced AI-integrated dental care designed for a pain-free experience. From 3D imaging to invisible aligners, we craft your perfect smile with precision.
           </p>
           <div className="flex flex-wrap gap-4 mb-10">
-            <a href="#book" className="bg-teal text-white font-semibold px-8 py-4 rounded-pill hover:opacity-90 transition">
+            <button
+              onClick={() => openChat("I'd like to book an appointment.")}
+              className="bg-teal text-white font-semibold px-8 py-4 rounded-pill hover:opacity-90 transition"
+            >
               Book an Appointment
-            </a>
-            <a href="#luna" className="border border-teal text-teal-dark font-semibold px-8 py-4 rounded-pill hover:bg-white transition">
+            </button>
+            <button
+              onClick={() => openChat(null)}
+              className="border border-teal text-teal-dark font-semibold px-8 py-4 rounded-pill hover:bg-white transition"
+            >
               Chat with Luna
-            </a>
+            </button>
           </div>
           <div className="flex gap-10">
             <div>
@@ -138,9 +325,12 @@ export default function App() {
               <li>• Predicts dental issues before they happen</li>
               <li>• Coordinates your care plan with autonomous precision</li>
             </ul>
-            <a href="#book" className="inline-block bg-white text-teal-dark font-semibold px-8 py-4 rounded-pill hover:opacity-90 transition">
+            <button
+              onClick={() => openChat(null)}
+              className="inline-block bg-white text-teal-dark font-semibold px-8 py-4 rounded-pill hover:opacity-90 transition"
+            >
               Talk to Luna
-            </a>
+            </button>
           </div>
           <img
             src="https://images.unsplash.com/photo-1629909613654-28e377c37b09?q=80&w=800&auto=format&fit=crop"
@@ -198,9 +388,12 @@ export default function App() {
           <p className="text-white/70 mb-8 max-w-lg mx-auto">
             Book your consultation today and let Luna, and our expert team, take care of the rest.
           </p>
-          <a href="#" className="inline-block bg-white text-teal-dark font-semibold px-8 py-4 rounded-pill hover:opacity-90 transition">
+          <button
+            onClick={() => openChat("I'd like to book an appointment.")}
+            className="inline-block bg-white text-teal-dark font-semibold px-8 py-4 rounded-pill hover:opacity-90 transition"
+          >
             Book an Appointment
-          </a>
+          </button>
         </div>
       </Section>
 
@@ -209,6 +402,21 @@ export default function App() {
         <div className="font-bold text-teal-dark">Clarity Dental</div>
         <div>&copy; {new Date().getFullYear()} Clarity Dental. All rights reserved.</div>
       </footer>
+
+      {/* Floating chat launcher */}
+      {!chatOpen && (
+        <button
+          onClick={() => openChat(null)}
+          className="fixed bottom-6 right-6 z-50 bg-teal text-white rounded-full w-14 h-14 flex items-center justify-center shadow-xl hover:opacity-90 transition"
+          aria-label="Chat with Luna"
+        >
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+          </svg>
+        </button>
+      )}
+
+      <ChatWidget open={chatOpen} onClose={() => setChatOpen(false)} initialMessage={chatInitialMessage} />
     </div>
   );
 }
