@@ -1,11 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { createChat } from "@n8n/chat";
-import "@n8n/chat/style.css";
 
 const NAV_LINKS = ["Home", "Services", "About", "Contact"];
 
-// Two real agents. Luna now routes to one or the other depending on
-// which entry point the visitor used (Book an Appointment vs. general chat).
+// Two real agents. Luna routes to one or the other depending on which
+// entry point the visitor used (Book an Appointment vs. general chat).
 const BOOKING_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/e3565331-0a32-4710-a33e-827582f53615/chat";
 const FAQ_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/202db174-cb87-4a7a-9768-64379f520f3d/chat";
 const LEAD_CAPTURE_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/03d769a7-4e89-4e14-9460-c519df4a762b/dental-clinic-lead-form";
@@ -43,54 +41,165 @@ function Section({ children, className = "" }) {
 }
 
 /**
- * Luna, backed by n8n's official @n8n/chat package.
+ * n8n's Chat Trigger (in "Streaming" response mode) returns the body as
+ * newline-delimited JSON events, not a single JSON blob:
  *
- * We keep Luna's own modal shell (header, close button, sizing) so the
- * branding stays intact, but the actual conversation UI + network layer
- * inside is mounted and driven by @n8n/chat's createChat(), pointed at
- * whichever agent's webhook matches the entry point the visitor used.
+ *   {"type":"begin","metadata":{...}}
+ *   {"type":"item","content":"...text chunk...","metadata":{...}}
+ *   {"type":"end","metadata":{...}}
  *
- * mode: 'booking' -> Appointment Booking Agent
+ * This reads the stream, concatenates every "item" event's `content`
+ * field in order, and reports the running text back via onChunk so the
+ * UI can update live as tokens arrive.
+ */
+async function sendChatMessage(webhookUrl, { chatInput, sessionId }, onChunk) {
+  const res = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "sendMessage", chatInput, sessionId }),
+  });
+
+  if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+
+  // Fallback for environments where the body isn't a readable stream —
+  // still try to parse it as NDJSON rather than showing raw text.
+  if (!res.body || !res.body.getReader) {
+    const text = await res.text();
+    return parseNdjsonChunk(text, "").fullText;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let fullText = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const { fullText: updated, remainder } = parseNdjsonChunk(buffer, fullText);
+    fullText = updated;
+    buffer = remainder;
+    if (fullText) onChunk(fullText);
+  }
+
+  return fullText;
+}
+
+// Parses as many complete NDJSON lines as are available in `buffer`,
+// appending any "item" content onto `fullText`. Returns the updated
+// text plus whatever incomplete trailing line should be kept for the
+// next read.
+function parseNdjsonChunk(buffer, fullText) {
+  const lines = buffer.split("\n");
+  const remainder = lines.pop() ?? "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const evt = JSON.parse(trimmed);
+      if (evt.type === "item" && typeof evt.content === "string") {
+        fullText += evt.content;
+      }
+    } catch {
+      // Ignore lines that aren't valid JSON yet (shouldn't happen once
+      // split on "\n", but be defensive).
+    }
+  }
+
+  return { fullText, remainder };
+}
+
+function getSessionId(mode) {
+  const key = `clarity-dental-session-${mode}`;
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem(key, id);
+  }
+  return id;
+}
+
+/**
+ * Luna. mode: 'booking' -> Appointment Booking Agent
  *       'faq'      -> FAQ Chat Assistant
  */
 function ChatWidget({ open, onClose, mode }) {
-  const mountRef = useRef(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const bottomRef = useRef(null);
+  const lastModeRef = useRef(null);
 
   useEffect(() => {
-    if (!open || !mountRef.current) return;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  // Reset the conversation with a fresh greeting whenever the widget
+  // opens or switches mode (booking <-> faq), so the two agents never
+  // bleed into the same visible thread.
+  useEffect(() => {
+    if (!open) return;
+    if (lastModeRef.current === mode) return;
+    lastModeRef.current = mode;
+    setError(false);
+    setMessages([
+      {
+        role: "assistant",
+        text:
+          mode === "booking"
+            ? "Hi, I'm Luna! I can help you book, reschedule, or cancel an appointment. What can I do for you today?"
+            : "Hi, I'm Luna, Clarity Dental's AI assistant. Ask me anything about our hours, services, insurance, or new patient info.",
+      },
+    ]);
+  }, [open, mode]);
+
+  async function handleSend(text) {
+    const trimmed = text.trim();
+    if (!trimmed || loading) return;
+
+    setMessages((m) => [...m, { role: "user", text: trimmed }]);
+    setInput("");
+    setLoading(true);
+    setError(false);
 
     const webhookUrl = mode === "booking" ? BOOKING_WEBHOOK_URL : FAQ_WEBHOOK_URL;
-    const initialMessages =
-      mode === "booking"
-        ? ["Hi, I'm Luna! I can help you book, reschedule, or cancel an appointment. What can I do for you today?"]
-        : ["Hi, I'm Luna, Clarity Dental's AI assistant. Ask me anything about our hours, services, insurance, or new patient info."];
+    const sessionId = getSessionId(mode);
 
-    // Fresh mount every time the widget opens or the mode changes, so we
-    // never end up with two chat instances layered on top of each other.
-    mountRef.current.innerHTML = "";
+    // Placeholder assistant bubble that fills in as tokens stream.
+    setMessages((m) => [...m, { role: "assistant", text: "" }]);
 
-    createChat({
-      webhookUrl,
-      target: mountRef.current,
-      mode: "fullscreen",
-      showWelcomeScreen: false,
-      initialMessages,
-      i18n: {
-        en: {
-          title: "",
-          subtitle: "",
-          inputPlaceholder: "Type a message…",
-        },
-      },
-    });
-  }, [open, mode]);
+    try {
+      await sendChatMessage(webhookUrl, { chatInput: trimmed, sessionId }, (partial) => {
+        setMessages((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", text: partial };
+          return copy;
+        });
+      });
+    } catch (e) {
+      setError(true);
+      setMessages((m) => {
+        const copy = [...m];
+        copy[copy.length - 1] = {
+          role: "assistant",
+          text: "I'm having trouble connecting right now — please call the front desk directly.",
+        };
+        return copy;
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-end sm:items-end sm:justify-end p-0 sm:p-6">
       <div className="absolute inset-0 bg-black/30 sm:hidden" onClick={onClose} />
-      <div className="relative w-full sm:w-96 h-full sm:h-[560px] bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden clarity-chat-shell">
+      <div className="relative w-full sm:w-96 h-full sm:h-[560px] bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
         <div className="bg-teal-dark text-white px-5 py-4 flex items-center justify-between">
           <div>
             <div className="font-semibold">Luna</div>
@@ -102,7 +211,46 @@ function ChatWidget({ open, onClose, mode }) {
             ×
           </button>
         </div>
-        <div ref={mountRef} className="flex-1 min-h-0" />
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-mint/30">
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+                  m.role === "user" ? "bg-teal text-white" : "bg-white text-teal-dark shadow-sm"
+                }`}
+              >
+                {m.text || (loading && i === messages.length - 1 ? "…" : "")}
+              </div>
+            </div>
+          ))}
+          <div ref={bottomRef} />
+        </div>
+        <form
+          className="border-t border-sage p-3 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend(input);
+          }}
+        >
+          <input
+            className="flex-1 rounded-full border border-sage px-4 py-2 text-sm focus:outline-none focus:border-teal"
+            placeholder="Type a message…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="bg-teal text-white rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-50"
+          >
+            Send
+          </button>
+        </form>
+        {error && (
+          <div className="px-4 pb-3 text-xs text-coral">
+            Luna's booking system had trouble responding — this message may not have gone through.
+          </div>
+        )}
       </div>
     </div>
   );
