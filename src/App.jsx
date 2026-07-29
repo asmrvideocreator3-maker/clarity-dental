@@ -18,7 +18,7 @@ const FEATURES = [
 const SERVICES = [
   { title: "Restorative Care", img: "https://images.unsplash.com/photo-1606811841689-23dfddce3e95?q=80&w=800&auto=format&fit=crop" },
   { title: "Cosmetic Design", img: "https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?q=80&w=800&auto=format&fit=crop" },
-  { title: "Aligner Therapy", img: "https://images.unsplash.com/photo-1595621864071-4b1f6a1e6f1c?q=80&w=800&auto=format&fit=crop" },
+  { title: "Aligner Therapy", img: "https://images.unsplash.com/photo-1609840114035-3c981b782dfe?q=80&w=800&auto=format&fit=crop" },
 ];
 
 const TEAM = [
