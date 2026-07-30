@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 
-const NAV_LINKS = ["Home", "Services", "About", "Contact"];
+const NAV_LINKS = [
+  { label: "Home", href: "#" },
+  { label: "Services", href: "#services" },
+  { label: "About", href: "#about" },
+  { label: "Contact", href: "#contact" },
+];
 
 // Two real agents. Luna routes to one or the other depending on which
 // entry point the visitor used (Book an Appointment vs. general chat).
@@ -351,6 +356,18 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMode, setChatMode] = useState("faq"); // 'booking' | 'faq'
 
+  // Enable smooth scrolling for anchor-link navigation (#services, #about,
+  // #contact) without relying on a global stylesheet. Setting this on the
+  // root element covers every in-page anchor click.
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.scrollBehavior;
+    root.style.scrollBehavior = "smooth";
+    return () => {
+      root.style.scrollBehavior = previous;
+    };
+  }, []);
+
   function openChat(mode) {
     setChatMode(mode);
     setChatOpen(true);
@@ -367,7 +384,7 @@ export default function App() {
         </div>
         <nav className="hidden md:flex gap-8 text-sm font-medium text-muted">
           {NAV_LINKS.map((l) => (
-            <a key={l} href={l === "Contact" ? "#contact" : "#"} className="hover:text-teal-dark transition-colors">{l}</a>
+            <a key={l.label} href={l.href} className="hover:text-teal-dark transition-colors">{l.label}</a>
           ))}
         </nav>
         <div className="flex items-center gap-3">
@@ -405,8 +422,8 @@ export default function App() {
       {menuOpen && (
         <div className="md:hidden fixed inset-x-0 top-[73px] z-40 bg-white border-b border-sage shadow-lg px-6 py-4 flex flex-col gap-4">
           {NAV_LINKS.map((l) => (
-            <a key={l} href={l === "Contact" ? "#contact" : "#"} className="text-teal-dark font-medium py-1" onClick={() => setMenuOpen(false)}>
-              {l}
+            <a key={l.label} href={l.href} className="text-teal-dark font-medium py-1" onClick={() => setMenuOpen(false)}>
+              {l.label}
             </a>
           ))}
           <button
@@ -479,7 +496,7 @@ export default function App() {
       </Section>
 
       {/* Services */}
-      <Section className="py-10 pb-24 text-center">
+      <Section className="py-10 pb-24 text-center scroll-mt-24" id="services">
         <p className="text-coral text-sm font-semibold uppercase tracking-wide mb-3">Subspecialties</p>
         <h2 className="text-3xl md:text-4xl font-bold mb-2">Modern Dentistry Simplified</h2>
         <p className="text-muted max-w-xl mx-auto mb-12">
@@ -523,7 +540,7 @@ export default function App() {
       </Section>
 
       {/* Team */}
-      <Section className="py-10 pb-24 text-center">
+      <Section className="py-10 pb-24 text-center scroll-mt-24" id="about">
         <h2 className="text-3xl md:text-4xl font-bold mb-2">Experts Behind The Technology</h2>
         <p className="text-muted max-w-xl mx-auto mb-12">
           Board-certified specialists blending decades of experience with cutting-edge tooling.
@@ -562,7 +579,7 @@ export default function App() {
       </Section>
 
       {/* Contact — new section, posts to the real Lead Capture webhook */}
-      <Section className="py-10 pb-24" id="contact">
+      <Section className="py-10 pb-24 scroll-mt-24" id="contact">
         <h2 className="text-3xl md:text-4xl font-bold mb-2 text-center">Get in Touch</h2>
         <p className="text-muted max-w-xl mx-auto mb-12 text-center">
           Have a question or want us to reach out? Send us a message and our team will follow up shortly.
