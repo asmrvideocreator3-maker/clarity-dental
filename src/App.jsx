@@ -11,7 +11,7 @@ const NAV_LINKS = [
 // entry point the visitor used (Book an Appointment vs. general chat).
 const BOOKING_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/e3565331-0a32-4710-a33e-827582f53615/chat";
 const FAQ_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/202db174-cb87-4a7a-9768-64379f520f3d/chat";
-const LEAD_CAPTURE_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/03d769a7-4e89-4e14-9460-c519df4a762b/dental-clinic-lead-form";
+const LEAD_CAPTURE_WEBHOOK_URL = "https://tester-ai-n8n-m7ht.onrender.com/webhook/dental-lead";
 
 const FEATURES = [
   { title: "Live AI Booking", desc: "Book your appointment instantly with our AI-powered scheduler, available 24/7." },
