@@ -41,8 +41,12 @@ const FAQS = [
   { q: "Is there emergency support?", a: "Yes, we hold same-day slots for dental emergencies during business hours." },
 ];
 
-function Section({ children, className = "" }) {
-  return <section className={`px-6 md:px-20 ${className}`}>{children}</section>;
+function Section({ children, className = "", ...rest }) {
+  return (
+    <section className={`px-6 md:px-20 ${className}`} {...rest}>
+      {children}
+    </section>
+  );
 }
 
 /**
